@@ -34,6 +34,8 @@ convert03 =
     List.foldl
         (\{ name, email } acc ->
             case ( name, email ) of
+                ( Just nameValue, Just emailValue ) ->
+                    { name = nameValue, email = emailValue } :: acc
                 ( Just nameValue, Nothing ) ->
                     { name = nameValue, email = "<unspecified>" } :: acc
 
