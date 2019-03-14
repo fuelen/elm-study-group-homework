@@ -28,6 +28,10 @@ type Msg
     | UpdateSlider String
 
 
+maxElapsedValue =
+    20
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -35,13 +39,19 @@ update msg model =
             ( model, Cmd.none )
 
         Tick time ->
-            ( { model | elapsedTime = model.elapsedTime + 1 }, Cmd.none )
+            ( { model | elapsedTime = Basics.min (model.elapsedTime + 1) maxElapsedValue }, Cmd.none )
 
         UpdateSlider valueStr ->
             case String.toInt valueStr of
                 Just value ->
                     ( { model
-                        | elapsedTime = model.elapsedTime + (value - model.sliderValue)
+                        | elapsedTime =
+                            Basics.max
+                                (Basics.min
+                                    (model.elapsedTime - (value - model.sliderValue))
+                                    maxElapsedValue
+                                )
+                                0
                         , sliderValue = value
                       }
                     , Cmd.none
@@ -55,7 +65,7 @@ update msg model =
 
 
 maxProgressValue =
-    "20"
+    maxElapsedValue |> String.fromInt
 
 
 view : Model -> Html Msg
