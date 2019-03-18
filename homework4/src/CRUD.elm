@@ -23,6 +23,7 @@ type alias Model =
     , inputName : String
     , inputSurname : String
     , selectedUserID : Maybe UserID
+    , filteredUsers : Maybe (List User)
     }
 
 
@@ -37,6 +38,7 @@ initialModel flags =
       , selectedUserID = Nothing
       , inputName = ""
       , inputSurname = ""
+      , filteredUsers = Nothing
       }
     , Cmd.none
     )
@@ -61,7 +63,18 @@ update msg model =
                 ( model, Cmd.none )
 
             FilterPrefix prefixInput ->
-                ( model, Cmd.none )
+                let
+                    filteredUsers =
+                        if prefixInput == "" then
+                            Nothing
+
+                        else
+                            model.users
+                                |> Dict.values
+                                |> List.filter (\user -> String.startsWith prefixInput user.surname)
+                                |> Just
+                in
+                ( { model | filteredUsers = filteredUsers }, Cmd.none )
 
             SelectUser userId ->
                 let
@@ -168,8 +181,8 @@ view model =
         , div []
             [ select
                 [ size 5, onInput SelectUser ]
-                (model.users
-                    |> Dict.values
+                (model.filteredUsers
+                    |> Maybe.withDefault (model.users |> Dict.values)
                     |> List.map (userOption model.selectedUserID)
                 )
             ]
