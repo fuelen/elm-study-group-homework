@@ -5,6 +5,10 @@ import Dict exposing (Dict)
 import Html exposing (Html, br, button, div, input, label, option, select, text)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick, onInput)
+import Http
+import Json.Decode
+import Json.Decode.Pipeline
+import Json.Encode
 
 
 type alias UserID =
@@ -27,6 +31,26 @@ type alias Model =
     }
 
 
+jsonEncUserParams user =
+    Json.Encode.object
+        [ ( "name", Json.Encode.string user.name )
+        , ( "surname", Json.Encode.string user.surname )
+        ]
+
+
+jsonDecUser =
+    Json.Decode.succeed
+        (\id name surname ->
+            { id = String.fromInt id
+            , name = name
+            , surname = surname
+            }
+        )
+        |> Json.Decode.Pipeline.required "id" Json.Decode.int
+        |> Json.Decode.Pipeline.required "name" Json.Decode.string
+        |> Json.Decode.Pipeline.required "surname" Json.Decode.string
+
+
 initialModel flags =
     ( { users =
             [ { id = "1", name = "test", surname = "test1123" }
@@ -40,7 +64,10 @@ initialModel flags =
       , inputSurname = ""
       , filteredUsers = Nothing
       }
-    , Cmd.none
+    , Http.get
+        { url = "http://localhost:8000/api/users/list.json"
+        , expect = Http.expectJson GotUsers (Json.Decode.list jsonDecUser)
+        }
     )
 
 
@@ -51,99 +78,164 @@ type Msg
     | InputName String
     | InputSurname String
     | CreateUser
+    | CreatedUser (Result Http.Error User)
     | UpdateUser UserID
+    | UpdatedUser (Result Http.Error User)
     | DeleteUser UserID
+    | DeletedUser (Result Http.Error UserID)
+    | GotUsers (Result Http.Error (List User))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    Debug.log "state"
-        (case msg of
-            NoOp ->
-                ( model, Cmd.none )
+    case msg of
+        NoOp ->
+            ( model, Cmd.none )
 
-            FilterPrefix prefixInput ->
-                let
-                    filteredUsers =
-                        if prefixInput == "" then
-                            Nothing
+        FilterPrefix prefixInput ->
+            let
+                filteredUsers =
+                    if prefixInput == "" then
+                        Nothing
 
-                        else
-                            model.users
-                                |> Dict.values
-                                |> List.filter (\user -> String.startsWith prefixInput user.surname)
-                                |> Just
-                in
-                ( { model | filteredUsers = filteredUsers }, Cmd.none )
+                    else
+                        model.users
+                            |> Dict.values
+                            |> List.filter (\user -> String.startsWith prefixInput user.surname)
+                            |> Just
+            in
+            ( { model | filteredUsers = filteredUsers }, Cmd.none )
 
-            SelectUser userId ->
-                let
-                    selectedUser =
-                        Dict.get userId model.users
+        GotUsers result ->
+            let
+                usersToDict =
+                    List.map (\user -> ( user.id, user )) >> Dict.fromList
+            in
+            case result of
+                Ok users ->
+                    ( { model | users = usersToDict users }, Cmd.none )
 
-                    newInputSurname =
-                        selectedUser
-                            |> Maybe.map .surname
-                            |> Maybe.withDefault model.inputSurname
+                Err _ ->
+                    ( model, Cmd.none )
 
-                    newInputName =
-                        selectedUser
-                            |> Maybe.map .name
-                            |> Maybe.withDefault model.inputName
-                in
-                ( { model
-                    | selectedUserID = Just userId
-                    , inputName = newInputName
-                    , inputSurname = newInputSurname
-                  }
-                , Cmd.none
-                )
+        SelectUser userId ->
+            let
+                selectedUser =
+                    Dict.get userId model.users
 
-            InputSurname surname ->
-                ( { model | inputSurname = surname }, Cmd.none )
+                newInputSurname =
+                    selectedUser
+                        |> Maybe.map .surname
+                        |> Maybe.withDefault model.inputSurname
 
-            InputName name ->
-                ( { model | inputName = name }, Cmd.none )
+                newInputName =
+                    selectedUser
+                        |> Maybe.map .name
+                        |> Maybe.withDefault model.inputName
+            in
+            ( { model
+                | selectedUserID = Just userId
+                , inputName = newInputName
+                , inputSurname = newInputSurname
+              }
+            , Cmd.none
+            )
 
-            CreateUser ->
-                let
-                    user =
-                        { id = "TODO: generate id" ++ model.inputName ++ model.inputSurname
-                        , name = model.inputName
-                        , surname = model.inputSurname
-                        }
-                in
-                ( { model
-                    | users = Dict.insert user.id user model.users
-                    , inputName = ""
-                    , inputSurname = ""
-                    , selectedUserID = Just user.id
-                  }
-                , Cmd.none
-                )
+        InputSurname surname ->
+            ( { model | inputSurname = surname }, Cmd.none )
 
-            UpdateUser selectedUserID ->
-                let
-                    updateUser user =
-                        { user
-                            | name = model.inputName
-                            , surname = model.inputSurname
-                        }
-                in
-                ( { model
-                    | users = Dict.update selectedUserID (Maybe.map updateUser) model.users
-                  }
-                , Cmd.none
-                )
+        InputName name ->
+            ( { model | inputName = name }, Cmd.none )
 
-            DeleteUser selectedUserID ->
-                ( { model
-                    | users = model.users |> Dict.remove selectedUserID
-                    , selectedUserID = Nothing
-                  }
-                , Cmd.none
-                )
-        )
+        CreateUser ->
+            let
+                userParams =
+                    { name = model.inputName
+                    , surname = model.inputSurname
+                    }
+            in
+            ( model
+            , Http.post
+                { url = "http://localhost:8000/api/users/create.json"
+                , body = Http.jsonBody (jsonEncUserParams userParams)
+                , expect = Http.expectJson CreatedUser jsonDecUser
+                }
+            )
+
+        CreatedUser result ->
+            case result of
+                Ok user ->
+                    ( { model
+                        | users = Dict.insert user.id user model.users
+                        , inputName = ""
+                        , inputSurname = ""
+                        , selectedUserID = Just user.id
+                      }
+                    , Cmd.none
+                    )
+
+                Err error ->
+                    ( model, Cmd.none )
+
+        UpdateUser selectedUserID ->
+            let
+                userParams =
+                    { name = model.inputName
+                    , surname = model.inputSurname
+                    }
+            in
+            ( model
+            , Http.request
+                { method = "PUT"
+                , headers = []
+                , url = "http://localhost:8000/api/users/" ++ selectedUserID ++ "/update.json"
+                , body = Http.jsonBody (jsonEncUserParams userParams)
+                , expect = Http.expectJson UpdatedUser jsonDecUser
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+            )
+
+        UpdatedUser result ->
+            case result of
+                Ok user ->
+                    ( { model | users = Dict.update user.id (always (Just user)) model.users }
+                    , Cmd.none
+                    )
+
+                Err error ->
+                    ( model, Cmd.none )
+
+        DeleteUser selectedUserID ->
+            ( model
+            , Http.request
+                { method = "DELETE"
+                , headers = []
+                , url = "http://localhost:8000/api/users/" ++ selectedUserID ++ "/delete.json"
+                , body = Http.emptyBody
+                , expect =
+                    Http.expectJson DeletedUser
+                        (Json.Decode.succeed
+                            identity
+                            |> Json.Decode.Pipeline.hardcoded selectedUserID
+                        )
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+            )
+
+        DeletedUser result ->
+            case result of
+                Ok selectedUserID ->
+                    ( { model
+                        | users = model.users |> Dict.remove selectedUserID
+                        , selectedUserID = Nothing
+                      }
+                    , Cmd.none
+                    )
+
+                Err error ->
+                    ( model, Cmd.none )
 
 
 formatName : User -> String
